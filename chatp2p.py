@@ -1,5 +1,5 @@
 #!/usr/bin/python
-##
+# -*- encoding: utf-8 -*-
 # TCP chat server
 # port 1664
 ##
@@ -19,50 +19,72 @@ code_pm    = 4000
 code_bm    = 5000
 
 ##
+def get_ips_list( sock_list ):
+	
+	ips_list = []
+	for user_name, sock_user in sock_list.items():
+		ip_sock, port_sock = sock_user.getpeername()
+		ips_list.append(ip_sock)
+		print "ip_sock : %s" %ip_sock
+	return ips_list
+
 def send_hello(s, nickname):
 	
-	msg = str( id_student + code_hello ) + "\001" + "Hello#" + nickname + "\r\n"
+	msg = str( id_student + code_hello ) + "\001" + "HELLO#" + nickname + "\r\n"
 	buf = msg.encode('utf-8')
 	s.send( buf )
 
 def send_start(s, nickname):
 	
-	msg = str( id_student + code_start ) + "\001" + "Start#" + nickname + "\r\n"
+	msg = str( id_student + code_start ) + "\001" + "START#" + nickname + "\r\n"
 	buf = msg.encode('utf-8')
 	s.send( buf )
 
 
 def send_ips(s, ips_list):
-
+	
 	str_ips = "("
 	
-	if( len(ips_list) > 1 ):
+	if( len(ips_list) >= 1 ):
 		for ip in ips_list[:-1]:
 			str_ips = str_ips+ip+','
-	
 		str_ips = str_ips + ips_list[-1]
 		
 	str_ips = str_ips + ")"
-	
+	print "ips = %s" %str_ips
 	msg = str( id_student + code_ips ) + "\001" + "IPS#"+ str_ips + "\r\n"
 	buf = msg.encode('utf-8')
 	s.send( buf )	
 	
+def send_pm( data, s_list, nickname ):
+
+	#recuperation du nickname 
+	data_split = data.split(" ")
+	dest_nickname = data_split[1]
+	del data_split[0]
+	del data_split[0]
+	#Reconstruction du message sans le nickname et le pm
+	new_data = " ".join(data_split)
+	msg = str( id_student + code_pm ) + "\001" + "PM#" + nickname + "#" + new_data
+	s_list[dest_nickname].send( msg )
 	
-	
+#def send_bm( data, nickname, s_list ):
+
+
+
 
 def lauch_chat(s_ecoute, s_list, nickname):
-
-	ips_list = []
 	
-	#test
-	ips_list.append("10.0.0.0")
-	ips_list.append("10.0.0.1")
-	
+	# On cree une socket en ecoute sur le proxy
+	s_ecoute.bind(('0.0.0.0', port))
 	s_ecoute.listen(5)
 	
 	chat_lance = True
 	sock_connected = []
+	
+	#On remplit le sock_connected avec les sockets deja connecte
+	for user_name, sock_user in s_list.items():
+		sock_connected.append(sock_user)
 	
 	#### Tant que l'utilisateur ne quitte pas ####
 	while chat_lance:
@@ -100,37 +122,74 @@ def lauch_chat(s_ecoute, s_list, nickname):
 
 					#Recuperation du code du message
 					msg_code = msg[:msg.index("\001")]
-					print "code = %s" %str(msg_code)
+			
 					######Traiter le message en fonction du code ########
 				
+					#### Code Start ####
 					if msg_code == str( id_student + code_start ):
+					
+						send_hello( sock_client, nickname ) #dire bonjour
+						
+						ips_list = get_ips_list( s_list ) #recuperer la liste d'ip
+						send_ips( sock_client, ips_list ) #la donner a la personne qui vient de se connecter
+						
+						# Ajout de cette personne dans la s_list avec son nickname comme indice
+						nickname_expediteur = msg[msg.index("#")+1 : msg.index('\r')] 
+						s_list[nickname_expediteur] = sock_client
+					####################	
+					
+					#### Code Hello ####
+					elif msg_code == str( id_student + code_hello ):
 						send_hello( sock_client, nickname )
-						send_ips( sock_client, ips_list )				
+						
+						# Ajout de cette personne dans la s_list avec son nickname comme indice
+						nickname_expediteur = msg[msg.index("#")+1 : msg.index('\r')] 
+						s_list[nickname_expediteur] = sock_client
+					####################
+					
 					#####################################################
-		
+		lin, lout, lex = select.select([stdin],[],[], 0.05)
+		for text in lin:
+			if text==stdin :
+				data = stdin.readline().strip("\n")
+				
+				if data == "quit":
+					chat_lance = False
+				elif data == "ban":
+					print "ban"
+				elif data == "unban":
+					print "unban"
+				elif data[:2] == "pm":
+					send_pm( data, s_list, nickname )
+				elif data[:2] == "bm":
+					print "bm"
+				else:
+					print "Erreur commande"
 	##############################################
 	
-	sock_answer.close
+	for sock in sock_connected:
+		sock.close()
+	print "Fin du Chat"
 	
 	
-def first_connection(s_ecoute, s_list, ip, nickname):
+############# Si le programme est lance avec un argument, first_connection est d'abord appele pour relier la machine au chat###
+def first_connection(s, s_list, ip, nickname):
 	
 	
 	ips_list = []
 	#premier socket pour envoi du start
 	s = socket.socket()
 	s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	s.bind(("0.0.0.0", port))
+	#s.bind(("0.0.0.0", port))
 	#envoie start.
 	s.connect( (ip, port) )
 	send_start( s, nickname )
 	
-	#s_ecoute.listen(5)
-	#n_socket, addr = s_ecoute.accept()
 	
 	recv_hello = False
 	recv_ip = False
 	
+	str_ips_list = ""
 	#tant que la liste d'adresse IP n'est pas donnee
 	while not recv_ip:
 	
@@ -147,16 +206,52 @@ def first_connection(s_ecoute, s_list, ip, nickname):
 					recv_hello = True
 					print "HELLO#"+ msg[msg.index("#")+1] 
 					nickname_expediteur = msg[msg.index("#")+1 : msg.index('\r')]
-					s_list[nickname_expediteur] = s		
+					s_list[nickname_expediteur] = s
 	
 				#traitement de IPS
 				if msg[:msg.index('\001')] == str( code_ips + id_student ):
 					recv_ip = True
 					#recevoir la liste des ip
-					ips_list = msg[msg.index("#")+1: msg.index('\r')]
-					print "IPS#%s" %ips_list
+					str_ips_list = msg[msg.index("#")+1: msg.index('\r')]
+					print "IPS#%s" %str_ips_list
+					str_ips_list = str_ips_list[1:-1]
+					
+		
+		ips_list = str_ips_list.split(',')
+		
+		if ips_list[0] <> "":	
+			#Hello a toutes les ips et attendre hello en retour
+			for ip_user in ips_list: 
+				
+				sock_user = socket.socket()
+				sock_user.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+				sock_user.bind(("0.0.0.0", port))
+				#envoie hello
+				sock_user.connect( (ip_user, port) )
+				send_hello( sock_user, nickname )
+		
+				recv_hello = False
 	
+			#tant que le hello n'est recu
+				while not recv_hello:
 	
+					msg_recv = sock_user.recv(1024).decode('utf-8')
+		
+					if msg_recv: 
+		
+						#separation des messages recus si il y en a plusieurs a la fois
+						msg_list = msg_recv.split('\n')
+			
+						for msg in msg_list:
+							#traitement de hello
+							if not recv_hello and msg[:msg.index('\001')] == str( code_hello + id_student ):
+								recv_hello = True
+								print "HELLO#"+ msg[msg.index("#")+1] 
+								nickname_expediteur = msg[msg.index("#")+1 : msg.index('\r')]
+								s_list[nickname_expediteur] = sock_user
+		
+			
+		
 
 
 
@@ -167,10 +262,6 @@ s_list = {}
 
 s_ecoute = socket.socket()
 s_ecoute.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-# On cree une socket en ecoute sur le proxy
-s_ecoute.bind(('0.0.0.0', port))
-
 
 # Erreur arg 
 if (len(argv) > 2 ):
@@ -191,9 +282,7 @@ if (len(argv) == 2):
 		
 	first_connection( s_ecoute, s_list, argv[1], nickname )
 	
-	
-else:
-	lauch_chat( s_ecoute, s_list, nickname )
+lauch_chat( s_ecoute, s_list, nickname )
 
 
 
