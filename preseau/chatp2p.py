@@ -40,6 +40,7 @@ def send_start(s, nickname):
 	buf = msg.encode('utf-8')
 	s.send( buf )
 
+
 def send_ips(s, ips_list):
 	
 	str_ips = "("
@@ -55,8 +56,7 @@ def send_ips(s, ips_list):
 	buf = msg.encode('utf-8')
 	s.send( buf )	
 	
-	
-def send_pm( data, s_list ):
+def send_pm( data, s_list, nickname ):
 
 	#recuperation du nickname 
 	data_split = data.split(" ")
@@ -66,30 +66,16 @@ def send_pm( data, s_list ):
 	#Reconstruction du message sans le nickname et le pm
 	new_data = " ".join(data_split)
 	msg = str( id_student + code_pm ) + "\001" + "PM" + '\043' + new_data + "\r\n"
+	s_list[dest_nickname].send( msg )
 	
-	try:
-		s_list[dest_nickname].send( msg )
-	except socket.error:
-		print u"utilisateur %s déconnecté" %dest_nickname.decode("utf-8")
-		return False
-		
-	return True
-
 
 #Envoi a tout le monde
-def send_bm( data, s_list, ban_list):
+def send_bm( data, s_list , nickname, ban_list):
 	new_data = data[data.index(" ")+1:]
 	msg = str( id_student + code_bm ) + "\001" + "BM" + '\043' + new_data + "\r\n"
-	
 	for user_name, sock_client in s_list.items():
 		if not user_name in ban_list:
-			
-			try:
-				sock_client.send( msg )
-				print u"à %s : %s" %(user_name, new_data.decode("utf-8"))
-			except socket.error:
-				pass
-
+			sock_client.send( msg )
 
 def ban( ban_list, nickname ):
 
@@ -130,9 +116,10 @@ def verif_IP( ip ):
 	occurence_point = ip.count(".")
 	if occurence_point == 3: 
 		ip_split = ip.split('.')
+		print str(len(ip_split) )
 		if len(ip_split) == 4:
 			for number in ip_split:
-				if number == '' or int(number) > 255 :
+				if number == '' or int(number) > 256 :
 					return False
 		else :
 			return False
@@ -140,18 +127,11 @@ def verif_IP( ip ):
 		return False
 	return True
 
+#def display_message(msg):
 
-#Appelé lorsqu'un utilisateur est déconnecté, cette fonction supprime le socket et le username des tableaux 
-def remove_user( s_list, list_ip_username, user_name ):
 	
-	ip_user = ""
-	for ip, u_n in list_ip_username.items():
-		if u_n == user_name:
-			ip_user = ip
-	
-	list_ip_username.pop( ip )
-	s_list.pop(user_name)
-	
+
+
 
 ##### ChatP2P ########
 def lauch_chat(s_ecoute, s_list, list_ip_username, nickname):
@@ -255,63 +235,48 @@ def lauch_chat(s_ecoute, s_list, list_ip_username, nickname):
 		for text in lin:
 			if text==stdin :
 				data = stdin.readline().strip("\n")
+				cmd = data[:data.index(" ")]
 				
-				cmd = []
-				try:
-					cmd = data[:data.index(" ")]
-
-					#Bannir
-					if cmd == "ban":
+				#Quitter
+				if cmd == "quit":
+					chat_lance = False
 				
-						data_split = data.split(' ')
-						user_nick = data_split[1]
-						if is_valid_nickname( user_nick, s_list):
-							ban( ban_list, user_nick )
+				#Bannir
+				elif cmd == "ban":
 				
-					#Débannir
-					elif cmd == "unban":
+					data_split = data.split(' ')
+					user_nick = data_split[1]
+					if is_valid_nickname( user_nick, s_list):
+						ban( ban_list, user_nick )
 				
-						data_split = data.split(' ')
-						user_nick = data_split[1]
-						if is_valid_nickname( user_nick, s_list):
-							unban( ban_list, user_nick )
+				#Débannir
+				elif cmd == "unban":
+				
+					data_split = data.split(' ')
+					user_nick = data_split[1]
+					if is_valid_nickname( user_nick, s_list):
+						unban( ban_list, user_nick )
 					
-					#PM
-					elif cmd == "pm":
-						
-						data_split = data.split(' ')
-						user_nick = data_split[1]
-						if is_valid_nickname( user_nick, s_list):
-							if not is_in_ban_list(user_nick, ban_list):
-								is_send = send_pm( data, s_list )
-								
-								#si l'utilisateur n'est plus connecté, on appelle remove_user
-								if not is_send:
-									remove_user( s_list, list_ip_username, user_nick )
-									
-							else: 
-								print u"impossible d'envoyer des messages à %s car il est banni" %user_nick.decode("utf-8")
-						
-					#BM
-					elif cmd == "bm":
-						send_bm( data, s_list, ban_list )
-							
-					else:
-						print "Erreur commande"
+				#PM
+				elif cmd == "pm":
 				
-				#S'il n'y a pas d'espace, tester si la commande est quit, sinon c'est une erreur	
-				except ValueError:
-					#Quitter
-					if data == "quit":
-						chat_lance = False
-					else:
-						print "Erreur commande"
+					data_split = data.split(' ')
+					user_nick = data_split[1]
+					if is_valid_nickname( user_nick, s_list):
+						if not is_in_ban_list(user_nick, ban_list):
+							send_pm( data, s_list, nickname )
+						else: 
+							print u"impossible d'envoyer des messages à %s car il est banni" %nickname
+						
+				#BM
+				elif cmd == "bm":
+					send_bm( data, s_list, nickname, ban_list )
+				else:
+					print "Erreur commande"
 		#################################################
 	
 	for sock in sock_connected:
 		sock.close()
-		
-	s_ecoute.close()
 	print "Fin du Chat"
 	
 	
@@ -396,12 +361,10 @@ def first_connection(s, s_list,list_ip_username, ip, nickname):
 							#traitement de hello
 							if not recv_hello and msg[:msg.index('\001')] == str( code_hello + id_student ):
 								recv_hello = True
-								print "Hello "+ msg[msg.index('\043')+1:] 
+								print "HELLO#"+ msg[msg.index("#")+1:] 
 								nickname_expediteur = msg[msg.index("#")+1 : msg.index('\r')]
 								s_list[nickname_expediteur] = sock_user
-								# Ajout correspondance ip => username
-								ip_user, port_user = sock_user.getpeername()
-								list_ip_username[ip_user] = nickname_expediteur	
+		
 			
 		
 
